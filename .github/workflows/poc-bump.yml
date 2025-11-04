@@ -1,0 +1,41 @@
+name: poc-bump
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  bump-and-pr:
+    if: contains(github.event.comment.body, '/bump')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply trivial change
+        run: |
+          echo -e "\n\nBumped at $(date -u +%FT%TZ)" >> README.md
+
+      - name: Commit & push branch
+        run: |
+          BR=poc-bump/${{ github.run_id }}
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git add -A
+          git commit -m "poc: bump README"
+          git push origin "$BR"
+
+      - name: Open PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `poc-bump/${{ github.run_id }}`,
+              base: 'main',
+              title: 'poc: bump README',
+              body: 'Smoke test PR created by workflow.'
+            });
