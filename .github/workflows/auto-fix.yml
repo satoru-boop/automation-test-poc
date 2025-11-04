@@ -1,0 +1,85 @@
+name: auto-fix
+on:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+
+jobs:
+  propose-fix:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 失敗したコミットSHAをチェックアウト
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Fetch CI logs
+        uses: actions/github-script@v7
+        id: getlogs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // 直近の失敗ジョブのログURLを収集（簡略）
+            const run_id = context.payload.workflow_run.id;
+            core.setOutput('run_url', `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run_id}`);
+
+      - name: Generate patch with OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RUN_URL: ${{ steps.getlogs.outputs.run_url }}
+        run: |
+          cat > prompt.txt << 'EOF'
+以下は直前のCIが失敗したリポジトリです。失敗の原因を推定し、最小の変更で修正する unified diff を出してください。
+制約:
+- 既存構成を壊さない
+- セキュリティに関わる変更は行わない
+- 出力は `---PATCH---` 以降に unified diff のみ
+EOF
+          node -e "
+          const fs=require('fs');
+          const prompt = fs.readFileSync('prompt.txt','utf8') + '\n\n【CIログURL】\n' + process.env.RUN_URL;
+          (async()=>{
+            const r=await fetch('https://api.openai.com/v1/responses',{
+              method:'POST',
+              headers:{'Authorization':`Bearer ${process.env.OPENAI_API_KEY}`,'Content-Type':'application/json'},
+              body: JSON.stringify({
+                model:'gpt-5-pro',
+                input:[{role:'system',content:'Output unified diff only after ---PATCH---.'},{role:'user',content:prompt}]
+              })
+            });
+            const j=await r.json();
+            const text=j.output_text||'';
+            const patch=(text.split('---PATCH---')[1]||'').trim();
+            require('fs').writeFileSync('change.patch', patch);
+          })();
+          "
+          test -s change.patch || (echo "No patch" && exit 1)
+          git apply --whitespace=fix change.patch
+
+      - name: Commit & open PR
+        run: |
+          BR=auto-fix/${{ github.run_id }}
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git add -A
+          git commit -m "auto-fix: propose patch for failing CI"
+          git push origin "$BR"
+
+      - name: Open PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `auto-fix/${{ github.run_id }}`,
+              base: 'main',
+              title: 'auto-fix: patch for failing CI',
+              body: 'This PR was generated automatically from CI failure.'
+            });
