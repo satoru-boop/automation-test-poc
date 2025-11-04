@@ -1,0 +1,32 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # --fix後の自動コミット用
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci || true
+
+      # 自動整形（成功時は再コミット）
+      - name: Lint & format (autofix)
+        run: |
+          npm run lint --if-present || true
+          npm run format --if-present || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git diff --quiet || (git add -A && git commit -m "ci: autofix (lint/format)" && echo "autofixed=yes" >> $GITHUB_OUTPUT)
+
+      - name: Type check
+        run: npm run typecheck --if-present
+      - name: Unit test
+        run: npm test --if-present
+      - name: Build
+        run: npm run build --if-present
