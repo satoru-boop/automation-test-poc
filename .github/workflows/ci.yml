@@ -1,16 +1,19 @@
 name: ci
 on:
-  pull_request:
   push:
-    branches: [main]
+  pull_request:
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - name: Sanity check
-        run: echo "CI OK - $(date -u +%FT%TZ)"
+      - name: Hello (no checkout)
+        run: |
+          echo "CI baseline OK at $(date -u +%FT%TZ)"
+
 
 
       # 自動整形（成功時は再コミット）
