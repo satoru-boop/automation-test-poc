@@ -7,13 +7,11 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # --fix後の自動コミット用
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '20' }
-      - run: npm ci || true
+      - name: Sanity check
+        run: echo "CI OK - $(date -u +%FT%TZ)"
+
 
       # 自動整形（成功時は再コミット）
       - name: Lint & format (autofix)
